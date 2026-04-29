@@ -61,7 +61,7 @@
 
     main {
       display: grid;
-      grid-template-columns: minmax(280px, 1fr) 72px minmax(280px, 1fr);
+      grid-template-columns: minmax(280px, 1fr) 116px minmax(280px, 1fr);
       gap: 12px;
       height: calc(100vh - 112px);
       padding: 12px;
@@ -135,6 +135,15 @@
     button:hover { border-color: #98a2b3; }
     button.primary { border-color: var(--blue); color: var(--blue); }
     button.danger { border-color: #f3b7b0; color: var(--red); }
+
+    input[type="text"] {
+      min-height: 34px;
+      width: 100%;
+      border: 1px solid #c8ced9;
+      padding: 6px 8px;
+      color: var(--text);
+      font: inherit;
+    }
 
     .bridge {
       display: flex;
@@ -331,8 +340,8 @@
     </section>
 
     <div class="bridge">
-      <button class="primary" id="download">&lt;-</button>
-      <button class="primary" id="upload">-&gt;</button>
+      <button class="primary" id="upload" title="Send selected local items to the remote folder">Upload &lt;-</button>
+      <button class="primary" id="download" title="Receive selected remote items into the local folder">Download -&gt;</button>
     </div>
 
     <section class="panel" id="local-panel">
@@ -388,6 +397,24 @@
     </div>
   </dialog>
 
+  <dialog id="input-dialog">
+    <form method="dialog" id="input-form">
+      <div class="modal-head">
+        <strong id="input-title">Input</strong>
+      </div>
+      <div class="modal-body">
+        <label>
+          <span id="input-label">Value</span>
+          <input id="input-value" type="text" autocomplete="off">
+        </label>
+      </div>
+      <div class="modal-foot">
+        <button id="input-cancel" type="button">Cancel</button>
+        <button class="primary" id="input-ok" type="submit">OK</button>
+      </div>
+    </form>
+  </dialog>
+
   <script>
     const state = {
       remotePath: "/",
@@ -402,6 +429,9 @@
     const progressEl = document.getElementById("progress");
     const cancelTransferEl = document.getElementById("cancel-transfer");
     const planDialog = document.getElementById("plan-dialog");
+    const inputDialog = document.getElementById("input-dialog");
+    const inputForm = document.getElementById("input-form");
+    const inputValue = document.getElementById("input-value");
 
     async function api(url, options = {}) {
       const response = await fetch(url, {
@@ -509,6 +539,18 @@
       return items.length === 1 ? items[0] : null;
     }
 
+    function selectedDestinationDir(side) {
+      const items = selectedItems(side);
+      if (!items.length) return state[`${side}Path`];
+      if (items.length === 1 && items[0].type === "dir") return items[0].path;
+      throw new Error(`Select one ${side} folder as the destination, or clear the ${side} selection.`);
+    }
+
+    function baseName(path) {
+      const parts = String(path || "").split("/").filter(Boolean);
+      return parts.length ? parts[parts.length - 1] : "";
+    }
+
     function escapeHtml(text) {
       return String(text).replace(/[&<>"']/g, (ch) => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -517,6 +559,31 @@
 
     function escapeAttr(text) {
       return escapeHtml(text);
+    }
+
+    function askText(title, label, initialValue = "") {
+      return new Promise((resolve) => {
+        const finish = (value) => {
+          inputForm.onsubmit = null;
+          document.getElementById("input-cancel").onclick = null;
+          inputDialog.oncancel = null;
+          if (inputDialog.open) inputDialog.close();
+          resolve(value);
+        };
+        document.getElementById("input-title").textContent = title;
+        document.getElementById("input-label").textContent = label;
+        inputValue.value = initialValue;
+        inputForm.onsubmit = (event) => {
+          event.preventDefault();
+          const value = inputValue.value.trim();
+          finish(value || null);
+        };
+        document.getElementById("input-cancel").onclick = () => finish(null);
+        inputDialog.oncancel = () => finish(null);
+        inputDialog.showModal();
+        inputValue.focus();
+        inputValue.select();
+      });
     }
 
     async function runPanelAction(side, action) {
@@ -530,7 +597,7 @@
         return;
       }
       if (action === "mkdir") {
-        const name = prompt("Folder name");
+        const name = await askText("New folder", "Folder name");
         if (!name) return;
         await api(`/api/${side}/mkdir`, {
           method: "POST",
@@ -562,7 +629,7 @@
           alert("Select exactly one item to rename.");
           return;
         }
-        const name = prompt("New name");
+        const name = await askText("Rename item", "New name", baseName(one.path));
         if (!name) return;
         await api(`/api/${side}/rename`, {
           method: "POST",
@@ -574,7 +641,7 @@
           alert("Select exactly one item to move.");
           return;
         }
-        const destDir = prompt("Destination folder path", state[`${side}Path`]);
+        const destDir = await askText("Move item", "Destination folder path", state[`${side}Path`]);
         if (!destDir) return;
         await api(`/api/${side}/move`, {
           method: "POST",
@@ -590,7 +657,7 @@
         alert("Select one or more local items first.");
         return;
       }
-      const body = { paths: selected.map((item) => item.path), remoteDir: state.remotePath };
+      const body = { paths: selected.map((item) => item.path), remoteDir: selectedDestinationDir("remote") };
       const plan = await api("/api/plan/upload", { method: "POST", body: JSON.stringify(body) });
       const overwrite = await showPlanDialog(plan, "Upload");
       if (overwrite === null) return;
@@ -608,7 +675,7 @@
         alert("Select one or more remote items first.");
         return;
       }
-      const body = { paths: selected.map((item) => item.path), localDir: state.localPath };
+      const body = { paths: selected.map((item) => item.path), localDir: selectedDestinationDir("local") };
       const plan = await api("/api/plan/download", { method: "POST", body: JSON.stringify(body) });
       const overwrite = await showPlanDialog(plan, "Download");
       if (overwrite === null) return;

@@ -1698,6 +1698,56 @@ class UsageScenarioTests(unittest.TestCase):
             self.assertEqual(wait_labels, ["agentFTP master"])
             self.assertTrue(stopped.is_set())
 
+    def test_s52_gui_remote_mkdir_and_upload_target_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            local = root / "local"
+            remote = root / "remote"
+            local.mkdir()
+            remote.mkdir()
+            (local / "payload.txt").write_text("payload", encoding="utf-8")
+            slave = self.start_slave(remote)
+            client = RemoteClient("127.0.0.1", slave.server_address[1], "secret")
+            master = AgentFTPMasterServer(("127.0.0.1", 0), MasterState(local, client))
+            threading.Thread(target=master.serve_forever, daemon=True).start()
+            base = f"http://127.0.0.1:{master.server_address[1]}"
+            try:
+                request_json(
+                    base,
+                    "POST",
+                    "/api/remote/mkdir",
+                    {"parent": "/incoming", "name": "gui-new"},
+                )
+                self.assertTrue((remote / "incoming" / "gui-new").is_dir())
+
+                plan = request_json(
+                    base,
+                    "POST",
+                    "/api/plan/upload",
+                    {"paths": ["/payload.txt"], "remoteDir": "/incoming/gui-new"},
+                )
+                self.assertEqual(plan["files"][0]["target"], "/incoming/gui-new/payload.txt")
+
+                job = request_json(
+                    base,
+                    "POST",
+                    "/api/jobs/upload",
+                    {"planId": plan["planId"], "overwrite": False},
+                )
+                result = wait_job(base, job["id"])
+                self.assertEqual(result["state"], "done")
+                self.assertEqual(
+                    (remote / "incoming" / "gui-new" / "payload.txt").read_text(
+                        encoding="utf-8"
+                    ),
+                    "payload",
+                )
+            finally:
+                master.shutdown()
+                master.server_close()
+                slave.shutdown()
+                slave.server_close()
+
 
 def request_json(base: str, method: str, path: str, payload: dict | None = None) -> dict:
     data = None if payload is None else json.dumps(payload).encode("utf-8")

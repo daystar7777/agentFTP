@@ -406,7 +406,7 @@ class MasterHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/local/move":
                 self.handle_local_move(payload)
             elif parsed.path == "/api/remote/mkdir":
-                self.server.state.remote.mkdir(path_from_payload(payload))
+                self.server.state.remote.mkdir(mkdir_path_from_payload(payload))
                 send_json(self, 200, {"ok": True})
             elif parsed.path == "/api/remote/delete":
                 self.server.state.remote.delete(path_from_payload(payload))
@@ -909,6 +909,14 @@ def to_local_agent_path(root: Path, target: Path) -> str:
 
 def path_from_payload(payload: dict[str, Any]) -> str:
     return clean_rel_path(str(payload.get("path", "/")))
+
+
+def mkdir_path_from_payload(payload: dict[str, Any]) -> str:
+    if "path" in payload:
+        return path_from_payload(payload)
+    parent = clean_rel_path(str(payload.get("parent", "/")))
+    name = safe_name(str(payload.get("name", "")))
+    return join_rel(parent, name)
 
 
 def first(query: dict[str, list[str]], name: str, default: str) -> str:
