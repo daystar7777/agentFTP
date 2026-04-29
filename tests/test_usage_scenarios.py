@@ -20,7 +20,7 @@ import agentftp.master as master_module
 from agentftp.bootstrap import format_summary, run_bootstrap
 from agentftp.cleanup import cleanup_stale_partials
 from agentftp.cli import main as cli_main
-from agentftp.common import MAX_JSON_BODY, MAX_UPLOAD_CHUNK, AgentFTPError
+from agentftp.common import MAX_JSON_BODY, MAX_UPLOAD_CHUNK, AgentFTPError, partial_paths
 from agentftp.console import should_relaunch_in_console
 from agentftp.connections import get_connection, normalize_alias
 from agentftp.firewall import maybe_open_firewall, open_firewall_port
@@ -1745,6 +1745,173 @@ class UsageScenarioTests(unittest.TestCase):
             finally:
                 master.shutdown()
                 master.server_close()
+                slave.shutdown()
+                slave.server_close()
+
+    def test_s53_gui_file_management_actions_cover_both_sides(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            local = root / "local"
+            remote = root / "remote"
+            local.mkdir()
+            remote.mkdir()
+            (local / "box").mkdir()
+            (remote / "rbox").mkdir()
+            slave = self.start_slave(remote)
+            client = RemoteClient("127.0.0.1", slave.server_address[1], "secret")
+            master = AgentFTPMasterServer(("127.0.0.1", 0), MasterState(local, client))
+            threading.Thread(target=master.serve_forever, daemon=True).start()
+            base = f"http://127.0.0.1:{master.server_address[1]}"
+            try:
+                request_json(base, "POST", "/api/local/mkdir", {"parent": "/", "name": "new-local"})
+                request_json(
+                    base,
+                    "POST",
+                    "/api/local/rename",
+                    {"path": "/new-local", "newName": "renamed-local"},
+                )
+                request_json(
+                    base,
+                    "POST",
+                    "/api/local/move",
+                    {"path": "/renamed-local", "destDir": "/box"},
+                )
+                self.assertTrue((local / "box" / "renamed-local").is_dir())
+                request_json(base, "POST", "/api/local/delete", {"path": "/box/renamed-local"})
+                self.assertFalse((local / "box" / "renamed-local").exists())
+
+                request_json(base, "POST", "/api/remote/mkdir", {"parent": "/", "name": "new-remote"})
+                request_json(
+                    base,
+                    "POST",
+                    "/api/remote/rename",
+                    {"path": "/new-remote", "newName": "renamed-remote"},
+                )
+                request_json(
+                    base,
+                    "POST",
+                    "/api/remote/move",
+                    {"path": "/renamed-remote", "destDir": "/rbox"},
+                )
+                self.assertTrue((remote / "rbox" / "renamed-remote").is_dir())
+                request_json(base, "POST", "/api/remote/delete", {"path": "/rbox/renamed-remote"})
+                self.assertFalse((remote / "rbox" / "renamed-remote").exists())
+
+                with self.assertRaises(HTTPError) as local_root_delete:
+                    request_json(base, "POST", "/api/local/delete", {"path": "/"})
+                self.assertEqual(local_root_delete.exception.code, 400)
+                with self.assertRaises(HTTPError) as remote_root_delete:
+                    request_json(base, "POST", "/api/remote/delete", {"path": "/"})
+                self.assertEqual(remote_root_delete.exception.code, 400)
+            finally:
+                master.shutdown()
+                master.server_close()
+                slave.shutdown()
+                slave.server_close()
+
+    def test_s54_resumable_push_and_pull_continue_existing_partials(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            local = root / "local"
+            remote = root / "remote"
+            received = root / "received"
+            local.mkdir()
+            remote.mkdir()
+            received.mkdir()
+            upload_data = b"upload-resume-data" * 64
+            download_data = b"download-resume-data" * 64
+            (local / "resumable.bin").write_bytes(upload_data)
+            (remote / "download.bin").write_bytes(download_data)
+            upload_part, _ = partial_paths(remote, "/resume/resumable.bin")
+            upload_part.write_bytes(upload_data[:17])
+            download_part, _ = partial_paths(received, "/download.bin")
+            download_part.write_bytes(download_data[:23])
+            slave = self.start_slave(remote)
+            try:
+                with redirect_stdout(io.StringIO()):
+                    push(
+                        "127.0.0.1",
+                        slave.server_address[1],
+                        "secret",
+                        local / "resumable.bin",
+                        "/resume",
+                        local_root=local,
+                    )
+                self.assertEqual((remote / "resume" / "resumable.bin").read_bytes(), upload_data)
+                self.assertFalse(upload_part.exists())
+
+                with redirect_stdout(io.StringIO()):
+                    pull(
+                        "127.0.0.1",
+                        slave.server_address[1],
+                        "secret",
+                        "/download.bin",
+                        received,
+                    )
+                self.assertEqual((received / "download.bin").read_bytes(), download_data)
+                self.assertFalse(download_part.exists())
+            finally:
+                slave.shutdown()
+                slave.server_close()
+
+    def test_s55_cli_alias_push_pull_and_tell_end_to_end(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project = root / "project"
+            remote = root / "remote"
+            project.mkdir()
+            remote.mkdir()
+            install_work_mem(project)
+            install_work_mem(remote)
+            (project / "cli.txt").write_text("cli payload", encoding="utf-8")
+            slave = self.start_slave(remote)
+            previous_cwd = Path.cwd()
+            try:
+                os.chdir(project)
+                with redirect_stdout(io.StringIO()):
+                    cli_main(
+                        [
+                            "connect",
+                            "lab",
+                            "127.0.0.1",
+                            str(slave.server_address[1]),
+                            "--password",
+                            "secret",
+                        ]
+                    )
+                self.assertEqual(get_connection("lab")["name"], "::lab")
+
+                with redirect_stdout(io.StringIO()):
+                    cli_main(["push", "lab", "cli.txt", "/cli", "--overwrite"])
+                self.assertEqual((remote / "cli" / "cli.txt").read_text(encoding="utf-8"), "cli payload")
+
+                with redirect_stdout(io.StringIO()):
+                    cli_main(
+                        [
+                            "tell",
+                            "lab",
+                            "Check the CLI transfer.",
+                            "--path",
+                            "/cli/cli.txt",
+                            "--from-name",
+                            "cli-master",
+                            "--auto-run",
+                        ]
+                    )
+                instructions = list_instructions(remote)
+                self.assertEqual(len(instructions), 1)
+                self.assertEqual(instructions[0]["from"], "cli-master")
+                self.assertTrue(instructions[0]["autoRun"])
+                self.assertEqual(instructions[0]["paths"], ["/cli/cli.txt"])
+
+                with redirect_stdout(io.StringIO()):
+                    cli_main(["pull", "lab", "/cli/cli.txt", "received", "--overwrite"])
+                self.assertEqual(
+                    (project / "received" / "cli.txt").read_text(encoding="utf-8"),
+                    "cli payload",
+                )
+            finally:
+                os.chdir(previous_cwd)
                 slave.shutdown()
                 slave.server_close()
 
