@@ -11,6 +11,7 @@ import secrets
 import shutil
 import socket
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -167,6 +168,23 @@ def send_error(handler: Any, exc: Exception) -> None:
         send_json(handler, exc.status, {"error": exc.code, "message": exc.message})
         return
     send_json(handler, 500, {"error": "internal_error", "message": str(exc)})
+
+
+def console_safe(value: object, stream: Any | None = None) -> str:
+    text = str(value)
+    target = stream or sys.stdout
+    encoding = getattr(target, "encoding", None) or "utf-8"
+    try:
+        text.encode(encoding)
+        return text
+    except (LookupError, UnicodeEncodeError):
+        return text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+
+
+def console_print(*values: object, sep: str = " ", end: str = "\n", file: Any | None = None) -> None:
+    target = file or sys.stdout
+    text = sep.join(console_safe(value, target) for value in values)
+    print(text, end=end, file=target)
 
 
 def storage_error(exc: OSError, action: str = "file operation") -> AgentFTPError:

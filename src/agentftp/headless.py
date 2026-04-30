@@ -7,6 +7,7 @@ from .common import (
     CHUNK_SIZE,
     AgentFTPError,
     clean_rel_path,
+    console_print,
     ensure_storage_available,
     format_bytes,
     join_rel,
@@ -76,7 +77,7 @@ def push(
             remote.mkdir(directory)
         for item in plan["files"]:
             source = resolve_path(local_root, item["source"])
-            print(f"upload {item['source']} -> {item['target']}")
+            console_print(f"upload {item['source']} -> {item['target']}")
             digest = sha256_file(source)
             status = remote.upload_status(item["target"], item["size"])
             if status.get("exists") and not overwrite:
@@ -120,7 +121,7 @@ def push(
         raise
     logger.complete()
     session = logger.summary()
-    print(f"push complete: {format_bytes(total)}")
+    console_print(f"push complete: {format_bytes(total)}")
     if alias:
         record_host_event(
             local_root,
@@ -195,7 +196,7 @@ def pull(
             resolve_path(local_root, directory, allow_missing=True).mkdir(parents=True, exist_ok=True)
         for item in plan["files"]:
             target = resolve_path(local_root, item["target"], allow_missing=True)
-            print(f"download {item['source']} -> {item['target']}")
+            console_print(f"download {item['source']} -> {item['target']}")
             if target.exists() and not overwrite:
                 raise AgentFTPError(409, "exists", f"Local file exists: {item['target']}")
             part, meta = partial_paths(local_root, item["target"])
@@ -238,7 +239,7 @@ def pull(
         raise
     logger.complete()
     session = logger.summary()
-    print(f"pull complete: {format_bytes(total)}")
+    console_print(f"pull complete: {format_bytes(total)}")
     if alias:
         record_host_event(
             event_root,
@@ -304,10 +305,10 @@ def tell(
         callback_alias=callback_alias,
     )
     instruction = response["instruction"]
-    print(f"instruction sent: {instruction['id']}")
-    print(f"local handoff: {handoff['file']}")
+    console_print(f"instruction sent: {instruction['id']}")
+    console_print(f"local handoff: {handoff['file']}")
     if instruction.get("handoffFile"):
-        print(f"remote handoff: {instruction['handoffFile']}")
+        console_print(f"remote handoff: {instruction['handoffFile']}")
     if alias:
         record_host_event(
             root,
@@ -376,7 +377,7 @@ def handoff(
         tls_insecure=tls_insecure,
         ca_file=ca_file,
     )
-    print(f"handoff complete: {', '.join(transfer['remotePaths'])}")
+    console_print(f"handoff complete: {', '.join(transfer['remotePaths'])}")
     return {"transfer": transfer, "instruction": instruction}
 
 
@@ -429,10 +430,10 @@ def report(
         handoff=handoff,
     )
     instruction = response["instruction"]
-    print(f"report sent: {instruction['id']}")
-    print(f"local report handoff: {handoff['file']}")
+    console_print(f"report sent: {instruction['id']}")
+    console_print(f"local report handoff: {handoff['file']}")
     if instruction.get("handoffFile"):
-        print(f"remote report handoff: {instruction['handoffFile']}")
+        console_print(f"remote report handoff: {instruction['handoffFile']}")
     if alias:
         record_host_event(
             root,
@@ -465,11 +466,11 @@ def resolve_conflicts(conflicts: list[str], overwrite: bool, side: str) -> bool:
         return overwrite
     if overwrite:
         return True
-    print(f"{len(conflicts)} {side} conflict(s):")
+    console_print(f"{len(conflicts)} {side} conflict(s):")
     for path in conflicts[:20]:
-        print(f"- {path}")
+        console_print(f"- {path}")
     if len(conflicts) > 20:
-        print(f"- ... and {len(conflicts) - 20} more")
+        console_print(f"- ... and {len(conflicts) - 20} more")
     if not sys.stdin.isatty():
         raise AgentFTPError(409, "conflicts", "Conflicts found; rerun with --overwrite")
     try:
@@ -483,7 +484,7 @@ def resolve_conflicts(conflicts: list[str], overwrite: bool, side: str) -> bool:
 
 def print_progress(done: int, total: int) -> None:
     if total <= 0:
-        print("progress: 0 B")
+        console_print("progress: 0 B")
         return
     pct = min(100.0, (done / total) * 100)
-    print(f"progress: {format_bytes(done)} / {format_bytes(total)} ({pct:.1f}%)")
+    console_print(f"progress: {format_bytes(done)} / {format_bytes(total)} ({pct:.1f}%)")

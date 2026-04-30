@@ -20,7 +20,7 @@ import agentftp.master as master_module
 from agentftp.bootstrap import format_summary, run_bootstrap
 from agentftp.cleanup import cleanup_stale_partials
 from agentftp.cli import main as cli_main
-from agentftp.common import MAX_JSON_BODY, MAX_UPLOAD_CHUNK, AgentFTPError, partial_paths
+from agentftp.common import MAX_JSON_BODY, MAX_UPLOAD_CHUNK, AgentFTPError, console_print, partial_paths
 from agentftp.console import should_relaunch_in_console
 from agentftp.connections import get_connection, normalize_alias
 from agentftp.firewall import maybe_open_firewall, open_firewall_port
@@ -1927,6 +1927,13 @@ class UsageScenarioTests(unittest.TestCase):
         self.assertIn("function renderTransferMonitor", html)
         self.assertIn("Cannot reach the local agentFTP GUI server", html)
         self.assertNotIn('class="bridge"', html)
+
+    def test_s57_console_print_replaces_unencodable_filename_chars(self) -> None:
+        raw = io.BytesIO()
+        stream = io.TextIOWrapper(raw, encoding="cp949", errors="strict")
+        console_print("upload /accent-e\u0301.txt -> /accent-e\u0301.txt", file=stream)
+        stream.flush()
+        self.assertIn(b"upload /accent-e?.txt -> /accent-e?.txt", raw.getvalue())
 
 
 def request_json(base: str, method: str, path: str, payload: dict | None = None) -> dict:
