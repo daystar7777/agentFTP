@@ -1915,6 +1915,19 @@ class UsageScenarioTests(unittest.TestCase):
                 slave.shutdown()
                 slave.server_close()
 
+    def test_s56_gui_has_persistent_transfer_controls_and_queue_monitor(self) -> None:
+        html = (Path(__file__).resolve().parents[1] / "src" / "agentftp" / "web" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('class="transfer-actions"', html)
+        self.assertIn('id="upload"', html)
+        self.assertIn('id="download"', html)
+        self.assertIn('id="transfer-monitor"', html)
+        self.assertIn('id="transfer-queue"', html)
+        self.assertIn("function renderTransferMonitor", html)
+        self.assertIn("Cannot reach the local agentFTP GUI server", html)
+        self.assertNotIn('class="bridge"', html)
+
 
 def request_json(base: str, method: str, path: str, payload: dict | None = None) -> dict:
     data = None if payload is None else json.dumps(payload).encode("utf-8")

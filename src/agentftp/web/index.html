@@ -61,10 +61,11 @@
 
     main {
       display: grid;
-      grid-template-columns: minmax(280px, 1fr) 116px minmax(280px, 1fr);
+      grid-template-columns: repeat(2, minmax(280px, 1fr));
       gap: 12px;
       height: calc(100vh - 112px);
       padding: 12px;
+      min-height: 0;
     }
 
     .panel {
@@ -145,21 +146,9 @@
       font: inherit;
     }
 
-    .bridge {
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      gap: 10px;
-    }
-
-    .bridge button {
-      width: 100%;
-      min-height: 38px;
-      font-weight: 650;
-    }
-
     .list {
       overflow: auto;
+      min-height: 0;
     }
 
     table {
@@ -196,7 +185,7 @@
 
     footer {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-columns: minmax(0, 1fr) auto auto;
       gap: 12px;
       align-items: center;
       height: 56px;
@@ -222,6 +211,110 @@
       display: flex;
       align-items: center;
       gap: 8px;
+    }
+
+    .transfer-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .transfer-actions button {
+      min-width: 112px;
+      font-weight: 650;
+    }
+
+    .transfer-monitor {
+      position: fixed;
+      left: 14px;
+      right: 14px;
+      bottom: 64px;
+      z-index: 20;
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      max-height: min(320px, 38vh);
+      border: 1px solid var(--line);
+      background: #fff;
+      box-shadow: 0 8px 24px rgb(15 23 42 / 0.16);
+    }
+
+    .transfer-monitor[hidden] {
+      display: none;
+    }
+
+    .transfer-monitor-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .transfer-monitor-title {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .transfer-monitor-title strong,
+    .transfer-monitor-title span,
+    .transfer-current {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .transfer-monitor-title span,
+    .transfer-current {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .transfer-current {
+      padding: 8px 12px;
+      border-bottom: 1px solid #eef1f5;
+    }
+
+    .transfer-queue {
+      overflow: auto;
+      min-height: 0;
+    }
+
+    .queue-row {
+      display: grid;
+      grid-template-columns: 84px minmax(0, 1fr) 88px;
+      gap: 8px;
+      align-items: center;
+      min-height: 30px;
+      padding: 0 12px;
+      border-bottom: 1px solid #eef1f5;
+      font-size: 12px;
+    }
+
+    .queue-row.current {
+      background: var(--select);
+    }
+
+    .queue-row.done .queue-status {
+      color: var(--green);
+    }
+
+    .queue-row.error .queue-status,
+    .queue-row.cancelled .queue-status {
+      color: var(--red);
+    }
+
+    .queue-path,
+    .queue-size {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .queue-status {
+      color: var(--muted);
+      font-weight: 650;
     }
 
     dialog {
@@ -299,13 +392,22 @@
     @media (max-width: 820px) {
       main {
         grid-template-columns: 1fr;
-        grid-template-rows: minmax(220px, 1fr) auto minmax(220px, 1fr);
-        height: auto;
-        min-height: calc(100vh - 112px);
+        grid-template-rows: repeat(2, minmax(0, 1fr));
+        height: calc(100vh - 112px);
       }
 
-      .bridge {
-        flex-direction: row;
+      footer {
+        grid-template-columns: minmax(0, 1fr);
+        height: auto;
+      }
+
+      .transfer-actions,
+      .footer-actions {
+        justify-content: space-between;
+      }
+
+      .transfer-actions button {
+        flex: 1;
       }
     }
   </style>
@@ -339,11 +441,6 @@
       <div class="list" id="remote-list"></div>
     </section>
 
-    <div class="bridge">
-      <button class="primary" id="upload" title="Send selected local items to the remote folder">Upload &lt;-</button>
-      <button class="primary" id="download" title="Receive selected remote items into the local folder">Download -&gt;</button>
-    </div>
-
     <section class="panel" id="local-panel">
       <div class="panel-head">
         <div class="title">
@@ -364,8 +461,24 @@
     </section>
   </main>
 
+  <section class="transfer-monitor" id="transfer-monitor" hidden>
+    <div class="transfer-monitor-head">
+      <div class="transfer-monitor-title">
+        <strong id="transfer-title">Transfer</strong>
+        <span id="transfer-summary">Waiting</span>
+      </div>
+      <button id="transfer-hide" type="button">Hide</button>
+    </div>
+    <div class="transfer-current" id="transfer-current">No active transfer</div>
+    <div class="transfer-queue" id="transfer-queue"></div>
+  </section>
+
   <footer>
     <div class="status" id="status">Ready</div>
+    <div class="transfer-actions">
+      <button class="primary" id="upload" title="Send selected local items to the remote folder">Upload &lt;-</button>
+      <button class="primary" id="download" title="Receive selected remote items into the local folder">Download -&gt;</button>
+    </div>
     <div class="footer-actions">
       <button class="danger" id="cancel-transfer" type="button" hidden>Cancel</button>
       <progress id="progress" value="0" max="1"></progress>
@@ -422,22 +535,34 @@
       remoteParent: "/",
       localParent: "/",
       selected: { remote: [], local: [] },
-      currentJobId: ""
+      currentJobId: "",
+      activeTransfer: null
     };
 
     const statusEl = document.getElementById("status");
     const progressEl = document.getElementById("progress");
     const cancelTransferEl = document.getElementById("cancel-transfer");
+    const transferMonitorEl = document.getElementById("transfer-monitor");
+    const transferTitleEl = document.getElementById("transfer-title");
+    const transferSummaryEl = document.getElementById("transfer-summary");
+    const transferCurrentEl = document.getElementById("transfer-current");
+    const transferQueueEl = document.getElementById("transfer-queue");
+    const transferHideEl = document.getElementById("transfer-hide");
     const planDialog = document.getElementById("plan-dialog");
     const inputDialog = document.getElementById("input-dialog");
     const inputForm = document.getElementById("input-form");
     const inputValue = document.getElementById("input-value");
 
     async function api(url, options = {}) {
-      const response = await fetch(url, {
-        headers: { "Content-Type": "application/json" },
-        ...options
-      });
+      let response;
+      try {
+        response = await fetch(url, {
+          headers: { "Content-Type": "application/json" },
+          ...options
+        });
+      } catch (error) {
+        throw new Error("Cannot reach the local agentFTP GUI server. The master process may have stopped; restart master mode and reload this page.");
+      }
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(data.message || data.error || response.statusText);
@@ -452,6 +577,80 @@
     function setCurrentJob(id) {
       state.currentJobId = id || "";
       cancelTransferEl.hidden = !state.currentJobId;
+    }
+
+    function setActiveTransfer(plan, verb) {
+      let offset = 0;
+      state.activeTransfer = {
+        verb,
+        totalBytes: Number(plan.totalBytes || 0),
+        totalFiles: Number(plan.totalFiles || 0),
+        totalDirs: Number(plan.totalDirs || 0),
+        files: plan.files.map((item) => {
+          const size = Number(item.size || 0);
+          const row = {
+            source: item.source,
+            target: item.target,
+            size,
+            startBytes: offset,
+            endBytes: offset + size
+          };
+          offset += size;
+          return row;
+        })
+      };
+      transferMonitorEl.hidden = false;
+      renderTransferMonitor();
+    }
+
+    function renderTransferMonitor(job = null) {
+      const transfer = state.activeTransfer;
+      if (!transfer) {
+        transferMonitorEl.hidden = true;
+        return;
+      }
+      transferMonitorEl.hidden = false;
+      const stateText = job ? job.state : "queued";
+      const doneBytes = Number(job?.doneBytes || 0);
+      const totalBytes = Number(job?.totalBytes || transfer.totalBytes || 0);
+      transferTitleEl.textContent = `${transfer.verb} transfer`;
+      transferSummaryEl.textContent =
+        `${stateText}: ${formatBytes(doneBytes)} / ${formatBytes(totalBytes)} · ${transfer.totalFiles} file(s), ${transfer.totalDirs} folder(s)`;
+      if (job?.state === "done") {
+        transferCurrentEl.textContent = "Completed";
+      } else if (job?.state === "cancelled") {
+        transferCurrentEl.textContent = job.error ? `Cancelled: ${job.error}` : "Cancelled";
+      } else if (job?.state === "error") {
+        transferCurrentEl.textContent = job.error ? `Error: ${job.error}` : "Error";
+      } else {
+        transferCurrentEl.textContent = job?.current ? `Current: ${job.current}` : "Waiting to start";
+      }
+      progressEl.max = totalBytes || 1;
+      progressEl.value = Math.min(doneBytes, totalBytes || 1);
+      transferQueueEl.innerHTML = transfer.files.map((item) => {
+        const pair = `${item.source} -> ${item.target}`;
+        const rowState = transferRowState(item, pair, job, doneBytes);
+        return `<div class="queue-row ${rowState}">
+          <span class="queue-status">${escapeHtml(rowState)}</span>
+          <span class="queue-path" title="${escapeAttr(pair)}">${escapeHtml(pair)}</span>
+          <span class="queue-size">${formatBytes(item.size)}</span>
+        </div>`;
+      }).join("") || `<div class="queue-row done">
+        <span class="queue-status">done</span>
+        <span class="queue-path">No files to transfer.</span>
+        <span class="queue-size">0 B</span>
+      </div>`;
+    }
+
+    function transferRowState(item, pair, job, doneBytes) {
+      if (!job) return "pending";
+      if (job.state === "error") return pair === job.current ? "error" : "pending";
+      if (job.state === "cancelled") return pair === job.current ? "cancelled" : "pending";
+      if (job.state === "done") return "done";
+      if (pair === job.current) return "current";
+      if (doneBytes >= item.endBytes) return "done";
+      if (doneBytes > item.startBytes && doneBytes < item.endBytes) return "current";
+      return "pending";
     }
 
     function formatBytes(value) {
@@ -661,6 +860,7 @@
       const plan = await api("/api/plan/upload", { method: "POST", body: JSON.stringify(body) });
       const overwrite = await showPlanDialog(plan, "Upload");
       if (overwrite === null) return;
+      setActiveTransfer(plan, "Upload");
       const job = await api("/api/jobs/upload", {
         method: "POST",
         body: JSON.stringify({ planId: plan.planId, overwrite })
@@ -679,6 +879,7 @@
       const plan = await api("/api/plan/download", { method: "POST", body: JSON.stringify(body) });
       const overwrite = await showPlanDialog(plan, "Download");
       if (overwrite === null) return;
+      setActiveTransfer(plan, "Download");
       const job = await api("/api/jobs/download", {
         method: "POST",
         body: JSON.stringify({ planId: plan.planId, overwrite })
@@ -733,6 +934,7 @@
       const total = job.totalBytes || 1;
       progressEl.max = total;
       progressEl.value = Math.min(job.doneBytes || 0, total);
+      renderTransferMonitor(job);
       setStatus(`${job.state}: ${job.current || job.kind} (${formatBytes(job.doneBytes)} / ${formatBytes(job.totalBytes)})`);
       if (job.state === "running" || job.state === "queued") {
         setTimeout(() => pollJob(id).catch(showError), 700);
@@ -767,6 +969,15 @@
     function showError(error) {
       console.error(error);
       setStatus(`error: ${error.message}`);
+      if (state.activeTransfer) {
+        renderTransferMonitor({
+          state: "error",
+          error: error.message,
+          current: "",
+          doneBytes: progressEl.value || 0,
+          totalBytes: progressEl.max || state.activeTransfer.totalBytes || 0
+        });
+      }
       alert(error.message);
     }
 
@@ -778,6 +989,9 @@
     document.getElementById("upload").addEventListener("click", () => startUpload().catch(showError));
     document.getElementById("download").addEventListener("click", () => startDownload().catch(showError));
     cancelTransferEl.addEventListener("click", () => cancelCurrentJob().catch(showError));
+    transferHideEl.addEventListener("click", () => {
+      transferMonitorEl.hidden = true;
+    });
 
     api("/api/bootstrap").then((data) => {
       document.getElementById("remote-meta").textContent = data.remoteBase;
