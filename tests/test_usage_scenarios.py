@@ -1601,6 +1601,16 @@ class UsageScenarioTests(unittest.TestCase):
         self.assertFalse(
             should_relaunch_in_console(
                 "auto",
+                stdin_isatty=False,
+                stdout_isatty=False,
+                is_child=False,
+                has_visible_console=True,
+                system="windows",
+            )
+        )
+        self.assertFalse(
+            should_relaunch_in_console(
+                "auto",
                 stdin_isatty=True,
                 stdout_isatty=True,
                 is_child=False,

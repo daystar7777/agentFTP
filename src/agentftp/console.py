@@ -18,6 +18,7 @@ def should_relaunch_in_console(
     stdin_isatty: bool | None = None,
     stdout_isatty: bool | None = None,
     is_child: bool | None = None,
+    has_visible_console: bool | None = None,
     system: str | None = None,
 ) -> bool:
     if mode == "no":
@@ -33,7 +34,25 @@ def should_relaunch_in_console(
             stdout_isatty = sys.stdout.isatty()
         if stdin_isatty and stdout_isatty:
             return False
+        resolved_system = (system or platform.system()).lower()
+        if resolved_system == "windows":
+            if has_visible_console is None:
+                has_visible_console = windows_visible_console_attached()
+            if has_visible_console:
+                return False
     return mode in ("auto", "yes")
+
+
+def windows_visible_console_attached() -> bool:
+    if platform.system().lower() != "windows":
+        return False
+    try:
+        import ctypes
+
+        window = ctypes.windll.kernel32.GetConsoleWindow()
+        return bool(window and ctypes.windll.user32.IsWindowVisible(window))
+    except Exception:
+        return False
 
 
 def relaunch_in_console_if_needed(argv: list[str], *, mode: str, cwd: Path | None = None) -> bool:
